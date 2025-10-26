@@ -325,3 +325,73 @@
     ))
   )
 )
+
+(define-public (dispute-sale (sale-id uint))
+  (let
+    (
+      (sale (unwrap! (map-get? sales sale-id) err-not-found))
+    )
+    (asserts! (is-eq tx-sender (get buyer sale)) err-unauthorized)
+    (asserts! (not (get accepted sale)) err-invalid-state)
+    (asserts! (not (get disputed sale)) err-invalid-state)
+    (var-set dispute-count (+ (var-get dispute-count) u1))
+    (ok (map-set sales sale-id
+      (merge sale {disputed: true})
+    ))
+  )
+)
+
+;; #[allow(unchecked_data)]
+(define-public (resolve-dispute (sale-id uint) (refund-percent uint) (decision (string-ascii 200)))
+  (let
+    (
+      (sale (unwrap! (map-get? sales sale-id) err-not-found))
+      (escrow-amount (unwrap! (get-escrow-amount sale-id) err-not-found))
+      (refund-amount (/ (* escrow-amount refund-percent) u100))
+      (seller-amount (- escrow-amount refund-amount))
+      (dispute-id (var-get dispute-count))
+    )
+    (asserts! (is-eq tx-sender contract-owner) err-owner-only)
+    (asserts! (get disputed sale) err-invalid-state)
+    (asserts! (<= refund-percent u100) err-invalid-state)
+    
+    (if (> refund-amount u0)
+      (try! (as-contract (stx-transfer? refund-amount tx-sender (get buyer sale))))
+      true
+    )
+    
+    (if (> seller-amount u0)
+      (try! (as-contract (stx-transfer? seller-amount tx-sender (get seller sale))))
+      true
+    )
+    
+    (map-delete escrow {sale-id: sale-id})
+    (map-set dispute-resolutions dispute-id
+      {
+        sale-id: sale-id,
+        resolver: tx-sender,
+        decision: decision,
+        refund-percent: refund-percent,
+        resolved-at: stacks-block-height
+      }
+    )
+    (ok true)
+  )
+)
+
+(define-public (update-platform-fee (new-fee uint))
+  (begin
+    (asserts! (is-eq tx-sender contract-owner) err-owner-only)
+    (asserts! (<= new-fee u20) err-invalid-state) ;; Max 20% fee
+    (ok (var-set platform-fee-percent new-fee))
+  )
+)
+
+(define-public (withdraw-platform-revenue (amount uint))
+  (begin
+    (asserts! (is-eq tx-sender contract-owner) err-owner-only)
+    (asserts! (<= amount (var-get platform-revenue)) err-insufficient-funds)
+    (try! (as-contract (stx-transfer? amount tx-sender contract-owner)))
+    (ok (var-set platform-revenue (- (var-get platform-revenue) amount)))
+  )
+)

@@ -227,3 +227,101 @@
     (ok (map-set favorites {user: tx-sender, listing-id: listing-id} (not current-status)))
   )
 )
+
+(define-public (purchase-dataset (listing-id uint))
+  (let
+    (
+      (listing (unwrap! (map-get? listings listing-id) err-not-found))
+      (price (get price listing))
+      (seller (get seller listing))
+      (new-sale-id (+ (var-get sale-count) u1))
+    )
+    (asserts! (get active listing) err-invalid-state)
+    (asserts! (not (is-eq tx-sender seller)) err-unauthorized)
+    (try! (stx-transfer? price tx-sender (as-contract tx-sender)))
+    (map-set sales new-sale-id
+      {
+        listing-id: listing-id,
+        buyer: tx-sender,
+        seller: seller,
+        price: price,
+        delivered: false,
+        accepted: false,
+        disputed: false,
+        purchased-at: stacks-block-height
+      }
+    )
+    (map-set escrow {sale-id: new-sale-id} price)
+    (var-set sale-count new-sale-id)
+    (var-set total-volume (+ (var-get total-volume) price))
+    (ok new-sale-id)
+  )
+)
+
+(define-public (confirm-delivery (sale-id uint))
+  (let
+    (
+      (sale (unwrap! (map-get? sales sale-id) err-not-found))
+    )
+    (asserts! (is-eq tx-sender (get buyer sale)) err-unauthorized)
+    (asserts! (not (get accepted sale)) err-invalid-state)
+    (asserts! (not (get disputed sale)) err-invalid-state)
+    (try! (release-escrow sale-id))
+    (ok (map-set sales sale-id
+      (merge sale {accepted: true, delivered: true})
+    ))
+  )
+)
+
+;; #[allow(unchecked_data)]
+(define-public (add-review (sale-id uint) (rating uint) (comment (string-ascii 200)))
+  (let
+    (
+      (sale (unwrap! (map-get? sales sale-id) err-not-found))
+    )
+    (asserts! (is-eq tx-sender (get buyer sale)) err-unauthorized)
+    (asserts! (get accepted sale) err-invalid-state)
+    (asserts! (and (>= rating u1) (<= rating u5)) err-invalid-state)
+    
+    (map-set reviews {sale-id: sale-id}
+      {
+        rating: rating,
+        comment: comment,
+        timestamp: stacks-block-height
+      }
+    )
+    (update-seller-rating (get seller sale) rating)
+  )
+)
+
+;; Private functions
+(define-private (release-escrow (sale-id uint))
+  (let
+    (
+      (sale (unwrap! (map-get? sales sale-id) err-not-found))
+      (escrow-amount (unwrap! (get-escrow-amount sale-id) err-not-found))
+      (platform-fee (unwrap! (calculate-platform-fee escrow-amount) err-invalid-state))
+      (seller-payout (- escrow-amount platform-fee))
+    )
+    (try! (as-contract (stx-transfer? seller-payout tx-sender (get seller sale))))
+    (var-set platform-revenue (+ (var-get platform-revenue) platform-fee))
+    (map-delete escrow {sale-id: sale-id})
+    (ok true)
+  )
+)
+
+(define-private (update-seller-rating (seller principal) (new-rating uint))
+  (let
+    (
+      (current-rating (default-to {total-sales: u0, rating-sum: u0} (map-get? seller-ratings seller)))
+      (new-total (+ (get total-sales current-rating) u1))
+      (new-sum (+ (get rating-sum current-rating) new-rating))
+    )
+    (ok (map-set seller-ratings seller
+      {
+        total-sales: new-total,
+        rating-sum: new-sum
+      }
+    ))
+  )
+)

@@ -150,3 +150,80 @@
     (ok (- price fee))
   )
 )
+
+;; Public functions
+;; #[allow(unchecked_data)]
+(define-public (create-listing 
+  (title (string-ascii 100))
+  (description (string-ascii 200))
+  (price uint)
+  (dataset-hash (buff 32))
+  (category (string-ascii 50))
+)
+  (let
+    (
+      (new-listing-id (+ (var-get listing-count) u1))
+    )
+    (map-set listings new-listing-id
+      {
+        seller: tx-sender,
+        title: title,
+        description: description,
+        price: price,
+        dataset-hash: dataset-hash,
+        active: true,
+        created-at: stacks-block-height
+      }
+    )
+    (map-set dataset-categories new-listing-id category)
+    (var-set listing-count new-listing-id)
+    (ok new-listing-id)
+  )
+)
+
+(define-public (update-listing-price (listing-id uint) (new-price uint))
+  (let
+    (
+      (listing (unwrap! (map-get? listings listing-id) err-not-found))
+    )
+    (asserts! (is-eq tx-sender (get seller listing)) err-unauthorized)
+    (asserts! (get active listing) err-invalid-state)
+    (ok (map-set listings listing-id
+      (merge listing {price: new-price})
+    ))
+  )
+)
+
+(define-public (deactivate-listing (listing-id uint))
+  (let
+    (
+      (listing (unwrap! (map-get? listings listing-id) err-not-found))
+    )
+    (asserts! (is-eq tx-sender (get seller listing)) err-unauthorized)
+    (ok (map-set listings listing-id
+      (merge listing {active: false})
+    ))
+  )
+)
+
+(define-public (reactivate-listing (listing-id uint))
+  (let
+    (
+      (listing (unwrap! (map-get? listings listing-id) err-not-found))
+    )
+    (asserts! (is-eq tx-sender (get seller listing)) err-unauthorized)
+    (ok (map-set listings listing-id
+      (merge listing {active: true})
+    ))
+  )
+)
+
+;; #[allow(unchecked_data)]
+(define-public (toggle-favorite (listing-id uint))
+  (let
+    (
+      (current-status (default-to false (map-get? favorites {user: tx-sender, listing-id: listing-id})))
+    )
+    (ok (map-set favorites {user: tx-sender, listing-id: listing-id} (not current-status)))
+  )
+)

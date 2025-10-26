@@ -75,3 +75,78 @@
     resolved-at: uint
   }
 )
+
+;; Read-only functions
+(define-read-only (get-listing (listing-id uint))
+  (map-get? listings listing-id)
+)
+
+(define-read-only (get-sale (sale-id uint))
+  (map-get? sales sale-id)
+)
+
+(define-read-only (get-listing-count)
+  (ok (var-get listing-count))
+)
+
+(define-read-only (get-sale-count)
+  (ok (var-get sale-count))
+)
+
+(define-read-only (get-seller-rating (seller principal))
+  (match (map-get? seller-ratings seller)
+    rating-data 
+      (let 
+        (
+          (total-sales (get total-sales rating-data))
+          (rating-sum (get rating-sum rating-data))
+        )
+        (if (> total-sales u0)
+          (ok (/ rating-sum total-sales))
+          (ok u0)
+        )
+      )
+    (ok u0)
+  )
+)
+
+(define-read-only (get-escrow-amount (sale-id uint))
+  (ok (default-to u0 (map-get? escrow {sale-id: sale-id})))
+)
+
+(define-read-only (get-platform-fee-percent)
+  (ok (var-get platform-fee-percent))
+)
+
+(define-read-only (get-total-volume)
+  (ok (var-get total-volume))
+)
+
+(define-read-only (get-platform-revenue)
+  (ok (var-get platform-revenue))
+)
+
+(define-read-only (is-favorite (user principal) (listing-id uint))
+  (ok (default-to false (map-get? favorites {user: user, listing-id: listing-id})))
+)
+
+(define-read-only (get-review (sale-id uint))
+  (ok (map-get? reviews {sale-id: sale-id}))
+)
+
+(define-read-only (get-category (listing-id uint))
+  (ok (map-get? dataset-categories listing-id))
+)
+
+(define-read-only (calculate-platform-fee (price uint))
+  (ok (/ (* price (var-get platform-fee-percent)) u100))
+)
+
+(define-read-only (calculate-seller-payout (price uint))
+  (let
+    (
+      (fee (unwrap-panic (calculate-platform-fee price)))
+    )
+    (ok (- price fee))
+  )
+)
